@@ -7,6 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
 /* Layout: one centered column, instrument-panel hierarchy — headline reading first, detail tiles after. */
 :root{
@@ -181,6 +183,22 @@ h1{
   font:500 12px/1.45 "IBM Plex Mono",monospace;white-space:nowrap;box-shadow:var(--shadow);
 }
 
+/* map */
+.map-card{padding:0;overflow:hidden;position:relative}
+#map{height:460px;width:100%;background:var(--surface-2);z-index:1}
+@media (max-width:600px){#map{height:380px}}
+.map-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;min-height:240px;color:var(--ink-2);padding:24px;text-align:center}
+.map-legend{display:flex;gap:12px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line);font:500 11px/1.4 "IBM Plex Mono",monospace;color:var(--ink-2);align-items:center}
+.map-legend i{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:-1px}
+.map-loading{position:absolute;top:10px;right:10px;z-index:800;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font:500 11px "IBM Plex Mono",monospace;color:var(--ink-2)}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--surface);color:var(--ink)}
+.leaflet-popup-content{font:400 13px/1.5 "IBM Plex Sans",sans-serif;margin:12px 14px}
+.leaflet-container{font-family:"IBM Plex Sans",sans-serif}
+.pop-aqi{font:600 26px/1 "IBM Plex Mono",monospace;margin:4px 0}
+.pop-chip{display:inline-block;padding:3px 9px;border-radius:999px;color:#fff;font:600 11.5px/1.2 "IBM Plex Sans",sans-serif}
+.pop-btn{margin-top:9px;display:inline-block;padding:6px 11px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--ink);font:500 12.5px/1.2 "IBM Plex Sans",sans-serif;cursor:pointer}
+.pop-btn:hover{border-color:var(--accent);color:var(--accent)}
+
 /* states */
 .state{padding:40px 20px;text-align:center;color:var(--ink-2)}
 .state .spin{
@@ -262,6 +280,17 @@ footer a{color:var(--ink-2)}
     <section class="card chart-card">
       <div id="chart"></div>
       <div class="tooltip" id="tooltip"></div>
+    </section>
+
+    <h2 class="section-h">World AQI map <span class="hint">zoom in for more cities · tap a city for its air</span></h2>
+    <section class="card map-card">
+      <div id="map-empty" class="map-empty">
+        <p style="margin:0;max-width:440px">See live air quality across India and the world, city by city, colored by AQI. Zoom in to reveal more cities; tap one to check its air.</p>
+        <button class="btn" id="map-load">Show the map</button>
+      </div>
+      <div id="map" hidden></div>
+      <div class="map-loading" id="map-loading" hidden>loading cities…</div>
+      <div class="map-legend" id="map-legend" hidden></div>
     </section>
 
     <footer>
@@ -659,11 +688,153 @@ function setScale(s) {
   $('scale-in').setAttribute('aria-pressed', String(s === 'in'));
   $('scale-us').setAttribute('aria-pressed', String(s === 'us'));
   if (data) render();
+  if (map) { renderMapLegend(); drawMarkers(visibleCityIdxs()); }
 }
 $('scale-in').addEventListener('click', () => setScale('in'));
 $('scale-us').addEventListener('click', () => setScale('us'));
 $('scale-in').setAttribute('aria-pressed', String(scale === 'in'));
 $('scale-us').setAttribute('aria-pressed', String(scale === 'us'));
+
+/* ---------- world AQI map ---------- */
+/* City list: [name, region, lat, lon, tier]. Tier 1 shows at world zoom, 2 at country zoom, 3 when zoomed in. */
+const CITIES = [
+// India — metros (tier 1)
+['Delhi','India',28.61,77.21,1],['Mumbai','India',19.08,72.88,1],['Kolkata','India',22.57,88.36,1],['Chennai','India',13.08,80.27,1],['Bengaluru','India',12.97,77.59,1],['Hyderabad','India',17.39,78.49,1],['Ahmedabad','India',23.03,72.58,1],['Pune','India',18.52,73.86,2],
+// India — tier 2
+['Jaipur','India',26.91,75.79,2],['Lucknow','India',26.85,80.95,2],['Kanpur','India',26.45,80.33,2],['Nagpur','India',21.15,79.09,2],['Indore','India',22.72,75.86,2],['Bhopal','India',23.26,77.41,2],['Patna','India',25.59,85.14,2],['Surat','India',21.17,72.83,2],['Varanasi','India',25.32,82.99,2],['Agra','India',27.18,78.01,2],['Chandigarh','India',30.73,76.78,2],['Guwahati','India',26.14,91.74,2],['Visakhapatnam','India',17.69,83.22,2],['Kochi','India',9.93,76.27,2],['Coimbatore','India',11.02,76.96,2],['Raipur','India',21.25,81.63,2],['Srinagar','India',34.08,74.80,2],['Dehradun','India',30.32,78.03,2],['Amritsar','India',31.63,74.87,2],['Ranchi','India',23.34,85.31,2],['Bhubaneswar','India',20.30,85.82,2],['Thiruvananthapuram','India',8.52,76.94,2],
+// Delhi NCR + India tier 3
+['Gurugram','NCR',28.46,77.03,3],['Noida','NCR',28.57,77.33,3],['Ghaziabad','NCR',28.67,77.43,3],['Faridabad','NCR',28.41,77.31,3],['Meerut','India',28.98,77.71,3],['Panipat','India',29.39,76.96,3],['Rohtak','India',28.90,76.57,3],['Hisar','India',29.15,75.72,3],['Ludhiana','India',30.90,75.86,3],['Jalandhar','India',31.33,75.58,3],['Patiala','India',30.34,76.39,3],['Vadodara','India',22.31,73.18,3],['Rajkot','India',22.30,70.80,3],['Jodhpur','India',26.24,73.02,3],['Udaipur','India',24.58,73.71,3],['Kota','India',25.21,75.86,3],['Bikaner','India',28.02,73.31,3],['Ajmer','India',26.45,74.64,3],['Gwalior','India',26.22,78.18,3],['Jabalpur','India',23.18,79.95,3],['Prayagraj','India',25.44,81.85,3],['Gorakhpur','India',26.76,83.37,3],['Bareilly','India',28.37,79.43,3],['Aligarh','India',27.88,78.08,3],['Moradabad','India',28.84,78.78,3],['Gaya','India',24.78,85.00,3],['Muzaffarpur','India',26.12,85.39,3],['Dhanbad','India',23.80,86.44,3],['Jamshedpur','India',22.80,86.20,3],['Asansol','India',23.68,86.97,3],['Durgapur','India',23.52,87.31,3],['Siliguri','India',26.73,88.40,3],['Cuttack','India',20.46,85.88,3],['Vijayawada','India',16.51,80.65,3],['Nellore','India',14.44,79.99,3],['Tirupati','India',13.63,79.42,3],['Warangal','India',17.98,79.60,3],['Madurai','India',9.93,78.12,3],['Tiruchirappalli','India',10.79,78.70,3],['Salem','India',11.66,78.15,3],['Puducherry','India',11.94,79.81,3],['Mysuru','India',12.30,76.64,3],['Mangaluru','India',12.91,74.86,3],['Hubballi','India',15.36,75.12,3],['Belagavi','India',15.85,74.50,3],['Panaji','Goa',15.49,73.83,3],['Nashik','India',19.99,73.79,3],['Chh. Sambhajinagar','India',19.88,75.34,3],['Kozhikode','India',11.26,75.78,3],['Thrissur','India',10.53,76.21,3],['Shimla','India',31.10,77.17,3],['Jammu','India',32.73,74.87,3],['Haridwar','India',29.95,78.16,3],['Shillong','India',25.57,91.88,3],['Imphal','India',24.82,93.94,3],
+// South Asia
+['Karachi','Pakistan',24.86,67.01,1],['Lahore','Pakistan',31.55,74.34,1],['Islamabad','Pakistan',33.68,73.05,2],['Peshawar','Pakistan',34.01,71.58,3],['Dhaka','Bangladesh',23.81,90.41,1],['Chattogram','Bangladesh',22.36,91.78,3],['Kathmandu','Nepal',27.72,85.32,2],['Colombo','Sri Lanka',6.93,79.85,2],['Kabul','Afghanistan',34.56,69.21,2],['Thimphu','Bhutan',27.47,89.64,3],['Male','Maldives',4.18,73.51,3],
+// East & SE Asia
+['Beijing','China',39.90,116.41,1],['Shanghai','China',31.23,121.47,1],['Guangzhou','China',23.13,113.26,2],['Shenzhen','China',22.54,114.06,2],['Chengdu','China',30.57,104.07,2],['Wuhan','China',30.59,114.31,2],["Xi'an",'China',34.34,108.94,2],['Hong Kong','China',22.32,114.17,1],['Ulaanbaatar','Mongolia',47.89,106.91,2],['Tokyo','Japan',35.68,139.69,1],['Osaka','Japan',34.69,135.50,2],['Seoul','South Korea',37.57,126.98,1],['Busan','South Korea',35.18,129.08,3],['Taipei','Taiwan',25.03,121.57,2],['Manila','Philippines',14.60,120.98,1],['Jakarta','Indonesia',-6.21,106.85,1],['Surabaya','Indonesia',-7.26,112.75,3],['Bangkok','Thailand',13.76,100.50,1],['Chiang Mai','Thailand',18.79,98.98,3],['Hanoi','Vietnam',21.03,105.85,1],['Ho Chi Minh City','Vietnam',10.82,106.63,2],['Singapore','Singapore',1.35,103.82,1],['Kuala Lumpur','Malaysia',3.14,101.69,1],['Yangon','Myanmar',16.87,96.20,2],['Phnom Penh','Cambodia',11.56,104.92,3],['Vientiane','Laos',17.97,102.63,3],
+// Middle East & Central Asia
+['Tehran','Iran',35.69,51.39,1],['Baghdad','Iraq',33.31,44.37,2],['Riyadh','Saudi Arabia',24.71,46.68,1],['Jeddah','Saudi Arabia',21.49,39.19,3],['Dubai','UAE',25.20,55.27,1],['Abu Dhabi','UAE',24.45,54.38,3],['Doha','Qatar',25.29,51.53,2],['Kuwait City','Kuwait',29.38,47.99,2],['Muscat','Oman',23.59,58.41,3],['Tel Aviv','Israel',32.09,34.78,2],['Istanbul','Türkiye',41.01,28.98,1],['Ankara','Türkiye',39.93,32.86,3],['Tashkent','Uzbekistan',41.30,69.24,2],['Almaty','Kazakhstan',43.24,76.89,2],['Bishkek','Kyrgyzstan',42.87,74.59,3],['Baku','Azerbaijan',40.41,49.87,3],['Tbilisi','Georgia',41.72,44.79,3],
+// Africa
+['Cairo','Egypt',30.04,31.24,1],['Lagos','Nigeria',6.52,3.38,1],['Accra','Ghana',5.60,-0.19,2],['Nairobi','Kenya',-1.29,36.82,2],['Addis Ababa','Ethiopia',9.01,38.75,2],['Johannesburg','South Africa',-26.20,28.05,1],['Cape Town','South Africa',-33.92,18.42,2],['Kinshasa','DR Congo',-4.44,15.27,2],['Casablanca','Morocco',33.57,-7.59,2],['Algiers','Algeria',36.75,3.06,3],['Tunis','Tunisia',36.81,10.18,3],['Dakar','Senegal',14.72,-17.47,3],['Khartoum','Sudan',15.50,32.56,3],
+// Europe
+['Moscow','Russia',55.76,37.62,1],['St Petersburg','Russia',59.93,30.34,3],['Kyiv','Ukraine',50.45,30.52,2],['Warsaw','Poland',52.23,21.01,2],['Krakow','Poland',50.06,19.94,3],['Berlin','Germany',52.52,13.40,1],['Munich','Germany',48.14,11.58,3],['Paris','France',48.86,2.35,1],['London','UK',51.51,-0.13,1],['Madrid','Spain',40.42,-3.70,2],['Barcelona','Spain',41.39,2.17,3],['Rome','Italy',41.90,12.50,2],['Milan','Italy',45.46,9.19,2],['Athens','Greece',37.98,23.73,3],['Amsterdam','Netherlands',52.37,4.90,2],['Brussels','Belgium',50.85,4.35,3],['Vienna','Austria',48.21,16.37,3],['Prague','Czechia',50.08,14.44,3],['Budapest','Hungary',47.50,19.04,3],['Bucharest','Romania',44.43,26.10,3],['Belgrade','Serbia',44.79,20.45,3],['Sofia','Bulgaria',42.70,23.32,3],['Sarajevo','Bosnia',43.86,18.41,3],['Stockholm','Sweden',59.33,18.07,2],['Oslo','Norway',59.91,10.75,3],['Helsinki','Finland',60.17,24.94,3],['Copenhagen','Denmark',55.68,12.57,3],['Dublin','Ireland',53.35,-6.26,3],['Lisbon','Portugal',38.72,-9.14,3],['Zurich','Switzerland',47.37,8.54,3],
+// Americas
+['New York','USA',40.71,-74.01,1],['Los Angeles','USA',34.05,-118.24,1],['Chicago','USA',41.88,-87.63,2],['Houston','USA',29.76,-95.37,3],['Phoenix','USA',33.45,-112.07,3],['San Francisco','USA',37.77,-122.42,2],['Seattle','USA',47.61,-122.33,3],['Denver','USA',39.74,-104.99,3],['Miami','USA',25.76,-80.19,3],['Atlanta','USA',33.75,-84.39,3],['Boston','USA',42.36,-71.06,3],['Washington DC','USA',38.91,-77.04,2],['Toronto','Canada',43.65,-79.38,1],['Vancouver','Canada',49.28,-123.12,3],['Montreal','Canada',45.50,-73.57,3],['Mexico City','Mexico',19.43,-99.13,1],['Guadalajara','Mexico',20.67,-103.35,3],['Monterrey','Mexico',25.69,-100.32,3],['Bogota','Colombia',4.71,-74.07,2],['Lima','Peru',-12.05,-77.04,2],['Santiago','Chile',-33.45,-70.67,1],['Buenos Aires','Argentina',-34.60,-58.38,1],['Sao Paulo','Brazil',-23.55,-46.63,1],['Rio de Janeiro','Brazil',-22.91,-43.17,2],['Brasilia','Brazil',-15.79,-47.88,3],['Quito','Ecuador',-0.18,-78.47,3],['La Paz','Bolivia',-16.49,-68.12,3],
+// Oceania
+['Sydney','Australia',-33.87,151.21,1],['Melbourne','Australia',-37.81,144.96,2],['Brisbane','Australia',-27.47,153.03,3],['Perth','Australia',-31.95,115.86,3],['Auckland','New Zealand',-36.85,174.76,2],
+];
+
+let map = null, markerLayer = null;
+const cityCache = new Map();   // index -> {at, aqiIN, aqiUS, pm25}
+let mapFetchSeq = 0;
+
+$('map-load').addEventListener('click', initMap);
+function initMap() {
+  if (map || typeof L === 'undefined') {
+    if (typeof L === 'undefined') { $('map-empty').querySelector('p').textContent = 'The map library could not load — check your connection and reload the page.'; }
+    return;
+  }
+  $('map-empty').hidden = true;
+  $('map').hidden = false;
+  $('map-legend').hidden = false;
+  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  map = L.map('map', { worldCopyJump: true, minZoom: 2, maxZoom: 12 }).setView([loc.lat, loc.lon], 5);
+  const esriStyle = dark ? 'Canvas/World_Dark_Gray_Base' : 'Canvas/World_Light_Gray_Base';
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/' + esriStyle + '/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Esri, HERE, Garmin &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 12,
+  }).addTo(map);
+  markerLayer = L.layerGroup().addTo(map);
+  map.on('moveend', updateMapMarkers);
+  renderMapLegend();
+  updateMapMarkers();
+}
+
+function visibleCityIdxs() {
+  const z = map.getZoom();
+  const maxTier = z <= 4 ? 1 : (z <= 5 ? 2 : 3);
+  const b = map.getBounds().pad(0.1);
+  const c = map.getCenter();
+  const idxs = [];
+  for (let i = 0; i < CITIES.length; i++) {
+    const [, , lat, lon, tier] = CITIES[i];
+    if (tier <= maxTier && b.contains([lat, lon])) idxs.push(i);
+  }
+  idxs.sort((a, bI) => {
+    const da = Math.hypot(CITIES[a][2] - c.lat, CITIES[a][3] - c.lng);
+    const db = Math.hypot(CITIES[bI][2] - c.lat, CITIES[bI][3] - c.lng);
+    return da - db;
+  });
+  return idxs.slice(0, 70);
+}
+
+async function updateMapMarkers() {
+  const idxs = visibleCityIdxs();
+  const seq = ++mapFetchSeq;
+  const stale = idxs.filter(i => { const e = cityCache.get(i); return !e || Date.now() - e.at > 10 * 60 * 1000; });
+  if (stale.length) {
+    $('map-loading').hidden = false;
+    try {
+      const u = new URL('https://air-quality-api.open-meteo.com/v1/air-quality');
+      u.search = new URLSearchParams({
+        latitude: stale.map(i => CITIES[i][2]).join(','),
+        longitude: stale.map(i => CITIES[i][3]).join(','),
+        current: 'pm2_5,pm10,nitrogen_dioxide,sulphur_dioxide,carbon_monoxide,ozone,us_aqi',
+        timezone: 'auto',
+      });
+      const res = await fetch(u);
+      if (res.ok) {
+        let arr = await res.json();
+        if (!Array.isArray(arr)) arr = [arr];
+        arr.forEach((r, k) => {
+          if (!r || !r.current) return;
+          const inRes = indianAQI(r.current);
+          cityCache.set(stale[k], { at: Date.now(), aqiIN: inRes ? inRes.si : null, aqiUS: r.current.us_aqi, pm25: r.current.pm2_5 });
+        });
+      }
+    } catch (e) { /* markers for cached cities still draw */ }
+    $('map-loading').hidden = true;
+  }
+  if (seq !== mapFetchSeq) return; // a newer pan superseded this one
+  drawMarkers(idxs);
+}
+
+function drawMarkers(idxs) {
+  markerLayer.clearLayers();
+  const bands = scale === 'in' ? IN_BANDS : US_BANDS;
+  for (const i of idxs) {
+    const [name, region, lat, lon, tier] = CITIES[i];
+    const e = cityCache.get(i);
+    const aqi = e ? (scale === 'in' ? e.aqiIN : e.aqiUS) : null;
+    const band = aqi != null ? bandFor(aqi, bands) : null;
+    const m = L.circleMarker([lat, lon], {
+      radius: tier === 1 ? 9 : tier === 2 ? 7.5 : 6,
+      fillColor: band ? band.color : '#9b9b9b',
+      fillOpacity: 0.92,
+      color: 'rgba(255,255,255,.85)',
+      weight: 1.5,
+    });
+    m.bindTooltip(name + (aqi != null ? ' · ' + aqi : ''), { direction: 'top', offset: [0, -6] });
+    const cigs = e && e.pm25 != null ? Math.round(e.pm25 / 22 * 10) / 10 : null;
+    m.bindPopup(
+      '<strong>' + name + '</strong> <span style="color:var(--ink-3)">' + region + '</span>' +
+      '<div class="pop-aqi">' + (aqi != null ? aqi : '—') + '</div>' +
+      (band ? '<span class="pop-chip" style="background:' + band.color + '">' + band.label + '</span>' : '') +
+      (cigs != null ? '<div style="color:var(--ink-2);font-size:12px;margin-top:6px">≈ ' + cigs + ' cigarettes/day</div>' : '') +
+      '<br><button class="pop-btn" onclick="window._openCity(' + i + ')">Full details</button>'
+    );
+    markerLayer.addLayer(m);
+  }
+}
+
+window._openCity = function (i) {
+  const [name, region, lat, lon] = CITIES[i];
+  if (map) map.closePopup();
+  setLocation({ name, sub: region, lat, lon });
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+function renderMapLegend() {
+  const bands = scale === 'in' ? IN_BANDS : US_BANDS;
+  $('map-legend').innerHTML = bands.map(b => '<span><i style="background:' + b.color + '"></i>' + b.label + '</span>').join('') +
+    '<span style="margin-left:auto">' + (scale === 'in' ? 'IN CPCB scale' : 'US EPA scale') + '</span>';
+}
 
 /* ---------- auto refresh every 10 min, and when the tab comes back into view ---------- */
 setInterval(() => { if (!document.hidden) loadAir(); }, 10 * 60 * 1000);
