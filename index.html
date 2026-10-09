@@ -400,7 +400,9 @@ function render() {
   chip.style.background = band.color;
   chip.style.color = band.ink;
   const driver = isIN && inRes ? ' · driven by ' + inRes.pollutant : '';
-  $('updated').textContent = 'Updated ' + new Date(cur.time).toLocaleString('en-IN', { hour: 'numeric', minute: '2-digit', day: 'numeric', month: 'short' }) + driver;
+  const dataTime = new Date(cur.time).toLocaleString('en-IN', { hour: 'numeric', minute: '2-digit', day: 'numeric', month: 'short' });
+  const checked = new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+  $('updated').textContent = 'Data for ' + dataTime + ' (newest hourly reading) · checked ' + checked + driver;
 
   $('advice').innerHTML = '<strong>' + band.label + ':</strong> ' + band.advice;
   renderBandBar(aqi, bands);
@@ -663,8 +665,9 @@ $('scale-us').addEventListener('click', () => setScale('us'));
 $('scale-in').setAttribute('aria-pressed', String(scale === 'in'));
 $('scale-us').setAttribute('aria-pressed', String(scale === 'us'));
 
-/* ---------- auto refresh every 20 min ---------- */
-setInterval(() => { if (!document.hidden) loadAir(); }, 20 * 60 * 1000);
+/* ---------- auto refresh every 10 min, and when the tab comes back into view ---------- */
+setInterval(() => { if (!document.hidden) loadAir(); }, 10 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadAir(); });
 
 loadAir();
 </script>
