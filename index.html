@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hawa Haal — Delhi Air Quality</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: one centered column, instrument-panel hierarchy — headline reading first, detail tiles after. */
+:root{
+  --bg:#f3f1ec;          /* hazy warm off-white, Delhi winter sky */
+  --surface:#fbfaf7;
+  --surface-2:#edeae3;
+  --ink:#23211d;
+  --ink-2:#5d5951;
+  --ink-3:#8a857b;
+  --line:#dcd8cf;
+  --accent:#3d6b8e;      /* desaturated slate blue for chart + controls */
+  --accent-soft:#3d6b8e22;
+  --chip-ink:#ffffff;
+  --cat:#8a857b;         /* set by JS to current AQI category color */
+  --shadow:0 1px 2px rgba(35,33,29,.06),0 8px 28px rgba(35,33,29,.07);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#191917;
+    --surface:#222220;
+    --surface-2:#2c2c29;
+    --ink:#ecebe6;
+    --ink-2:#aaa89f;
+    --ink-3:#7c7a71;
+    --line:#383833;
+    --accent:#7fa8c9;
+    --accent-soft:#7fa8c92b;
+    --shadow:0 1px 2px rgba(0,0,0,.35),0 10px 30px rgba(0,0,0,.35);
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font:400 15px/1.55 "IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding-block:0 48px;
+  padding-inline:16px;
+}
+.wrap{max-width:860px;margin:0 auto}
+
+/* ambient category glow at top of page */
+.glow{
+  position:fixed;inset:0 0 auto 0;height:220px;pointer-events:none;z-index:0;
+  background:linear-gradient(to bottom,color-mix(in srgb,var(--cat) 16%,transparent),transparent);
+  transition:background .6s ease;
+}
+.wrap{position:relative;z-index:1}
+
+header{padding-block:26px 10px}
+.eyebrow{
+  font:600 11px/1 "IBM Plex Mono",ui-monospace,monospace;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--cat);display:inline-block;animation:pulse 2.4s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){.live-dot{animation:none}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+h1{
+  font:800 clamp(30px,6vw,44px)/1.05 "Bricolage Grotesque","IBM Plex Sans",sans-serif;
+  margin:8px 0 2px;letter-spacing:-.01em;text-wrap:balance;
+}
+.sub{color:var(--ink-2);margin:0;font-size:14px}
+
+/* controls */
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 20px;position:relative}
+.searchbox{flex:1 1 220px;min-width:0;position:relative}
+.searchbox input{
+  width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;
+  background:var(--surface);color:var(--ink);font:inherit;font-size:14px;
+}
+.searchbox input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.btn{
+  padding:10px 14px;border:1px solid var(--line);border-radius:10px;cursor:pointer;
+  background:var(--surface);color:var(--ink);font:500 14px/1.3 "IBM Plex Sans",sans-serif;
+  display:inline-flex;align-items:center;gap:7px;white-space:nowrap;
+}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.btn[disabled]{opacity:.55;cursor:default}
+.results{
+  position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;
+  background:var(--surface);border:1px solid var(--line);border-radius:10px;
+  box-shadow:var(--shadow);overflow:hidden;
+}
+.results button{
+  display:block;width:100%;text-align:left;padding:10px 12px;border:0;background:none;
+  color:var(--ink);font:inherit;font-size:14px;cursor:pointer;
+}
+.results button:hover,.results button:focus-visible{background:var(--surface-2);outline:none}
+.results .meta{color:var(--ink-3);font-size:12px}
+
+/* hero card */
+.card{
+  background:var(--surface);border:1px solid var(--line);border-radius:16px;
+  padding:20px;box-shadow:var(--shadow);
+}
+.hero{display:flex;gap:24px;flex-wrap:wrap;align-items:stretch;border-top:4px solid var(--cat)}
+.hero-main{flex:1 1 260px;min-width:0}
+.hero-side{flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:12px;justify-content:center}
+.aqi-label-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.scale-toggle{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.scale-toggle button{
+  border:0;background:none;padding:5px 10px;cursor:pointer;color:var(--ink-3);
+  font:600 11px/1 "IBM Plex Mono",monospace;letter-spacing:.08em;
+}
+.scale-toggle button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent)}
+.scale-toggle button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.aqi-num{
+  font:600 clamp(64px,14vw,104px)/1 "IBM Plex Mono",monospace;
+  letter-spacing:-.04em;font-variant-numeric:tabular-nums;margin:4px 0 2px;
+}
+.chip{
+  display:inline-flex;align-items:center;gap:7px;padding:6px 13px;border-radius:999px;
+  background:var(--cat);color:var(--chip-ink);font:600 14px/1.2 "IBM Plex Sans",sans-serif;
+}
+.updated{color:var(--ink-3);font-size:12.5px;margin-top:10px;font-family:"IBM Plex Mono",monospace}
+
+/* band scale strip */
+.bandbar{margin-top:4px}
+.bandbar .track{display:flex;height:10px;border-radius:6px;overflow:hidden;gap:2px}
+.bandbar .seg{flex:1}
+.bandbar .marker-row{position:relative;height:16px;margin-top:2px}
+.bandbar .marker{
+  position:absolute;top:0;transform:translateX(-50%);width:0;height:0;
+  border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:9px solid var(--ink);
+}
+.bandbar .band-labels{display:flex;justify-content:space-between;color:var(--ink-3);font:500 10.5px/1 "IBM Plex Mono",monospace;margin-top:2px}
+.advice{color:var(--ink-2);font-size:14px;margin:0}
+.advice strong{color:var(--ink)}
+
+/* cigarettes */
+.cig-card{margin-top:16px;display:flex;gap:18px;flex-wrap:wrap;align-items:center}
+.cig-count{min-width:150px}
+.cig-count .big{
+  font:600 42px/1 "IBM Plex Mono",monospace;letter-spacing:-.03em;font-variant-numeric:tabular-nums;
+}
+.cig-count .big small{font-size:16px;color:var(--ink-2);font-weight:500;letter-spacing:0}
+.cig-count .cap{color:var(--ink-2);font-size:13.5px;margin-top:4px;max-width:240px}
+.cig-icons{flex:1 1 280px;min-width:0;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.cig-icons svg{display:block}
+.cig-note{flex-basis:100%;color:var(--ink-3);font-size:12px;margin:2px 0 0}
+
+/* pollutant grid */
+.section-h{
+  font:700 17px/1.25 "Bricolage Grotesque",sans-serif;margin:28px 0 12px;
+  display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+}
+.section-h .hint{font:400 12.5px/1.3 "IBM Plex Sans",sans-serif;color:var(--ink-3)}
+.poll-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+.poll{
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+}
+.poll .name{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.poll .name b{font-size:13.5px;font-weight:600}
+.poll .name span{color:var(--ink-3);font-size:11px}
+.poll .val{
+  font:600 24px/1.15 "IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;margin-top:4px;
+}
+.poll .val small{font-size:11px;color:var(--ink-3);font-weight:400;font-family:"IBM Plex Sans",sans-serif}
+.poll .bar{height:5px;border-radius:3px;background:var(--surface-2);margin-top:9px;overflow:hidden}
+.poll .bar i{display:block;height:100%;border-radius:3px}
+.poll .subidx{color:var(--ink-3);font:500 10.5px/1 "IBM Plex Mono",monospace;margin-top:5px}
+
+/* chart */
+.chart-card{position:relative}
+.chart-card svg{width:100%;height:auto;display:block}
+.tooltip{
+  position:absolute;pointer-events:none;z-index:20;display:none;
+  background:var(--ink);color:var(--bg);border-radius:8px;padding:7px 10px;
+  font:500 12px/1.45 "IBM Plex Mono",monospace;white-space:nowrap;box-shadow:var(--shadow);
+}
+
+/* states */
+.state{padding:40px 20px;text-align:center;color:var(--ink-2)}
+.state .spin{
+  width:26px;height:26px;border-radius:50%;margin:0 auto 12px;
+  border:3px solid var(--line);border-top-color:var(--accent);animation:rot 1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce){.state .spin{animation:none}}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+footer{margin-top:34px;color:var(--ink-3);font-size:12px;line-height:1.7}
+footer a{color:var(--ink-2)}
+.srcnote{border-top:1px solid var(--line);padding-top:14px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="glow" aria-hidden="true"></div>
+<div class="wrap">
+  <header>
+    <div class="eyebrow"><span class="live-dot"></span> LIVE AIR QUALITY · <span id="eb-scale">INDIA CPCB SCALE</span></div>
+    <h1 id="place-name">Delhi</h1>
+    <p class="sub" id="place-sub">New Delhi, India</p>
+  </header>
+
+  <div class="controls">
+    <div class="searchbox">
+      <input id="search" type="search" placeholder="Search a city or area… (e.g. Anand Vihar, Gurugram)" autocomplete="off" aria-label="Search a city">
+      <div class="results" id="results" hidden></div>
+    </div>
+    <button class="btn" id="loc-btn" title="Use my location">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg>
+      My location
+    </button>
+    <button class="btn" id="refresh-btn" title="Refresh data">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/></svg>
+      Refresh
+    </button>
+  </div>
+
+  <div id="loading" class="card state"><div class="spin"></div>Checking the air…</div>
+  <div id="error" class="card state" hidden>
+    <p id="error-msg" style="margin:0 0 12px">Could not load air quality data.</p>
+    <button class="btn" id="retry-btn">Try again</button>
+  </div>
+
+  <main id="app" hidden>
+    <section class="card hero" aria-label="Current air quality index">
+      <div class="hero-main">
+        <div class="aqi-label-row">
+          <span style="font:600 12px/1 'IBM Plex Mono',monospace;letter-spacing:.12em;color:var(--ink-3)">AIR QUALITY INDEX</span>
+          <div class="scale-toggle" role="group" aria-label="AQI scale">
+            <button id="scale-in" aria-pressed="true">IN&nbsp;CPCB</button>
+            <button id="scale-us" aria-pressed="false">US&nbsp;EPA</button>
+          </div>
+        </div>
+        <div class="aqi-num" id="aqi-num">—</div>
+        <span class="chip" id="aqi-chip">—</span>
+        <div class="updated" id="updated">—</div>
+      </div>
+      <div class="hero-side">
+        <div class="bandbar" id="bandbar"></div>
+        <p class="advice" id="advice"></p>
+      </div>
+    </section>
+
+    <section class="card cig-card" aria-label="Cigarette equivalence">
+      <div class="cig-count">
+        <div class="big" id="cig-num">—<small> cigarettes</small></div>
+        <div class="cap">A full day breathing this air does roughly this much damage to your lungs.</div>
+      </div>
+      <div class="cig-icons" id="cig-icons" aria-hidden="true"></div>
+      <p class="cig-note">Based on Berkeley Earth's rule of thumb: 22 µg/m³ of PM2.5 over 24 hours ≈ 1 cigarette.</p>
+    </section>
+
+    <h2 class="section-h">Pollutants <span class="hint">concentration now · bar shows CPCB sub-index (0–500)</span></h2>
+    <div class="poll-grid" id="poll-grid"></div>
+
+    <h2 class="section-h">Last 24 hours <span class="hint">PM2.5, µg/m³ — hover for values</span></h2>
+    <section class="card chart-card">
+      <div id="chart"></div>
+      <div class="tooltip" id="tooltip"></div>
+    </section>
+
+    <footer>
+      <p class="srcnote">
+        Data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo Air Quality API</a> (CAMS atmospheric model) — a model estimate for your exact coordinates, so it can differ from the nearest CPCB/DPCC monitoring station.
+        Indian AQI computed from CPCB breakpoints; US AQI per US EPA.
+        Cigarette equivalence: Berkeley Earth (2015).
+        This is an awareness tool, not medical advice.
+      </p>
+    </footer>
+  </main>
+</div>
+
+<script>
+'use strict';
+/* ---------- constants ---------- */
+const DEFAULT_LOC = { name:'Delhi', sub:'New Delhi, India', lat:28.6139, lon:77.2090 };
+
+const IN_BANDS = [
+  { max:50,  label:'Good',         color:'#2e9e5b', ink:'#fff', advice:'Air is clean. Minimal health impact — a rare good day, enjoy the outdoors.' },
+  { max:100, label:'Satisfactory', color:'#7bb13c', ink:'#fff', advice:'Minor breathing discomfort possible for very sensitive people. Fine for most outdoor activity.' },
+  { max:200, label:'Moderate',     color:'#d4a017', ink:'#fff', advice:'Breathing discomfort for people with asthma, lung or heart disease. Sensitive groups should limit prolonged outdoor exertion.' },
+  { max:300, label:'Poor',         color:'#e07a1f', ink:'#fff', advice:'Breathing discomfort for most people on prolonged exposure. Cut down outdoor exercise; consider an N95 outdoors.' },
+  { max:400, label:'Very Poor',    color:'#d43d2a', ink:'#fff', advice:'Respiratory illness likely on prolonged exposure. Avoid outdoor exertion; wear an N95 outside; run a purifier indoors.' },
+  { max:500, label:'Severe',       color:'#8f1d1d', ink:'#fff', advice:'Emergency conditions — affects healthy people and seriously impacts those with existing disease. Stay indoors with purified air; N95 if you must go out.' },
+];
+const US_BANDS = [
+  { max:50,  label:'Good',                          color:'#2e9e5b', ink:'#fff', advice:'Air quality is satisfactory and poses little or no risk.' },
+  { max:100, label:'Moderate',                      color:'#d4a017', ink:'#fff', advice:'Acceptable; unusually sensitive people should consider reducing prolonged outdoor exertion.' },
+  { max:150, label:'Unhealthy for Sensitive Groups',color:'#e07a1f', ink:'#fff', advice:'Children, older adults and people with lung/heart disease should reduce prolonged outdoor exertion.' },
+  { max:200, label:'Unhealthy',                     color:'#d43d2a', ink:'#fff', advice:'Everyone may begin to feel effects. Reduce outdoor exertion; sensitive groups should avoid it.' },
+  { max:300, label:'Very Unhealthy',                color:'#8e44ad', ink:'#fff', advice:'Health alert: everyone may experience serious effects. Avoid outdoor exertion; wear an N95 outside.' },
+  { max:500, label:'Hazardous',                     color:'#7e2a3b', ink:'#fff', advice:'Emergency conditions. Everyone should avoid all outdoor activity; stay indoors with purified air.' },
+];
+
+/* CPCB sub-index breakpoints: [concLo, concHi, idxLo, idxHi]. CO in mg/m³, rest µg/m³. */
+const CPCB_BP = {
+  pm2_5:[[0,30,0,50],[30,60,50,100],[60,90,100,200],[90,120,200,300],[120,250,300,400],[250,380,400,500]],
+  pm10: [[0,50,0,50],[50,100,50,100],[100,250,100,200],[250,350,200,300],[350,430,300,400],[430,510,400,500]],
+  no2:  [[0,40,0,50],[40,80,50,100],[80,180,100,200],[180,280,200,300],[280,400,300,400],[400,520,400,500]],
+  so2:  [[0,40,0,50],[40,80,50,100],[80,380,100,200],[380,800,200,300],[800,1600,300,400],[1600,2400,400,500]],
+  co:   [[0,1,0,50],[1,2,50,100],[2,10,100,200],[10,17,200,300],[17,34,300,400],[34,51,400,500]],
+  o3:   [[0,50,0,50],[50,100,50,100],[100,168,100,200],[168,208,200,300],[208,748,300,400],[748,1288,400,500]],
+};
+const POLLUTANTS = [
+  { key:'pm2_5', apiKey:'pm2_5',            name:'PM2.5', desc:'fine particles',  unit:'µg/m³' },
+  { key:'pm10',  apiKey:'pm10',             name:'PM10',  desc:'coarse dust',     unit:'µg/m³' },
+  { key:'no2',   apiKey:'nitrogen_dioxide', name:'NO₂',   desc:'traffic exhaust', unit:'µg/m³' },
+  { key:'so2',   apiKey:'sulphur_dioxide',  name:'SO₂',   desc:'industry, coal',  unit:'µg/m³' },
+  { key:'co',    apiKey:'carbon_monoxide',  name:'CO',    desc:'combustion',      unit:'mg/m³' },
+  { key:'o3',    apiKey:'ozone',            name:'O₃',    desc:'smog ozone',      unit:'µg/m³' },
+];
+
+/* ---------- state ---------- */
+let loc = { ...DEFAULT_LOC };
+let scale = 'in';           // 'in' | 'us'
+let data = null;            // last API payload
+try {
+  const saved = JSON.parse(localStorage.getItem('hawa-loc') || 'null');
+  if (saved && isFinite(saved.lat) && isFinite(saved.lon)) loc = saved;
+  const s = localStorage.getItem('hawa-scale');
+  if (s === 'us' || s === 'in') scale = s;
+} catch (e) {}
+
+/* ---------- helpers ---------- */
+const $ = (id) => document.getElementById(id);
+function subIndex(key, conc) {
+  if (conc == null || !isFinite(conc)) return null;
+  const bps = CPCB_BP[key];
+  for (const [cLo, cHi, iLo, iHi] of bps) {
+    if (conc <= cHi) return Math.round(iLo + (conc - cLo) * (iHi - iLo) / (cHi - cLo));
+  }
+  return 500;
+}
+function indianAQI(cur) {
+  let worst = null;
+  for (const p of POLLUTANTS) {
+    let c = cur[p.apiKey];
+    if (p.key === 'co' && c != null) c = c / 1000; // µg → mg
+    const si = subIndex(p.key, c);
+    if (si != null && (worst == null || si > worst.si)) worst = { si, pollutant: p.name };
+  }
+  return worst;
+}
+function bandFor(aqi, bands) {
+  for (const b of bands) if (aqi <= b.max) return b;
+  return bands[bands.length - 1];
+}
+function fmt(n, d = 0) {
+  return n == null || !isFinite(n) ? '—' : n.toLocaleString('en-IN', { maximumFractionDigits: d, minimumFractionDigits: 0 });
+}
+
+/* ---------- data fetch ---------- */
+async function loadAir() {
+  $('loading').hidden = false; $('error').hidden = true; $('app').hidden = true;
+  const u = new URL('https://air-quality-api.open-meteo.com/v1/air-quality');
+  u.search = new URLSearchParams({
+    latitude: loc.lat, longitude: loc.lon,
+    current: 'pm2_5,pm10,nitrogen_dioxide,sulphur_dioxide,carbon_monoxide,ozone,us_aqi',
+    hourly: 'pm2_5',
+    past_days: '1', forecast_days: '1', timezone: 'auto',
+  });
+  try {
+    const res = await fetch(u);
+    if (!res.ok) throw new Error('API responded ' + res.status);
+    data = await res.json();
+    if (!data.current || data.current.pm2_5 == null) throw new Error('No air quality data for this location.');
+    render();
+  } catch (err) {
+    $('loading').hidden = true;
+    $('error').hidden = false;
+    $('error-msg').textContent = 'Could not load air quality data — ' + (err.message || 'network error') + '. Check your connection and try again.';
+  }
+}
+
+/* ---------- render ---------- */
+function render() {
+  const cur = data.current;
+  const inRes = indianAQI(cur);
+  const usAqi = cur.us_aqi;
+
+  const isIN = scale === 'in';
+  const aqi = isIN ? (inRes ? inRes.si : null) : usAqi;
+  const bands = isIN ? IN_BANDS : US_BANDS;
+  if (aqi == null) { scaleUnavailable(); return; }
+  const band = bandFor(aqi, bands);
+
+  document.documentElement.style.setProperty('--cat', band.color);
+  $('eb-scale').textContent = isIN ? 'INDIA CPCB SCALE' : 'US EPA SCALE';
+  $('place-name').textContent = loc.name;
+  $('place-sub').textContent = loc.sub || (loc.lat.toFixed(3) + '°, ' + loc.lon.toFixed(3) + '°');
+
+  $('aqi-num').textContent = fmt(aqi);
+  const chip = $('aqi-chip');
+  chip.textContent = band.label;
+  chip.style.background = band.color;
+  chip.style.color = band.ink;
+  const driver = isIN && inRes ? ' · driven by ' + inRes.pollutant : '';
+  $('updated').textContent = 'Updated ' + new Date(cur.time).toLocaleString('en-IN', { hour: 'numeric', minute: '2-digit', day: 'numeric', month: 'short' }) + driver;
+
+  $('advice').innerHTML = '<strong>' + band.label + ':</strong> ' + band.advice;
+  renderBandBar(aqi, bands);
+  renderCigs(cur.pm2_5);
+  renderPollutants(cur);
+  renderChart();
+
+  $('loading').hidden = true; $('error').hidden = true; $('app').hidden = false;
+}
+
+function scaleUnavailable() {
+  $('loading').hidden = true;
+  $('error').hidden = false;
+  $('error-msg').textContent = 'The ' + (scale === 'in' ? 'Indian' : 'US') + ' AQI could not be computed for this location.';
+}
+
+function renderBandBar(aqi, bands) {
+  const maxIdx = bands[bands.length - 1].max;
+  let lo = 0;
+  const segs = bands.map(b => {
+    const w = ((b.max - lo) / maxIdx) * 100;
+    const s = '<div class="seg" style="flex:0 0 ' + w + '%;background:' + b.color + '" title="' + b.label + ' (' + (lo + (lo ? 1 : 0)) + '–' + b.max + ')"></div>';
+    lo = b.max;
+    return s;
+  }).join('');
+  const pos = Math.min(100, (aqi / maxIdx) * 100);
+  $('bandbar').innerHTML =
+    '<div class="track">' + segs + '</div>' +
+    '<div class="marker-row"><div class="marker" style="left:' + pos + '%"></div></div>' +
+    '<div class="band-labels"><span>0</span><span>' + maxIdx + '</span></div>';
+}
+
+function renderCigs(pm25) {
+  const cigs = pm25 / 22;
+  const shown = Math.round(cigs * 10) / 10;
+  $('cig-num').innerHTML = fmt(shown, 1) + '<small> cigarettes / day</small>';
+  const wrap = $('cig-icons');
+  wrap.innerHTML = '';
+  const full = Math.floor(cigs);
+  const frac = cigs - full;
+  const maxIcons = 25;
+  const n = Math.min(full, maxIcons);
+  for (let i = 0; i < n; i++) wrap.appendChild(cigIcon(1));
+  if (full < maxIcons && frac > 0.05) wrap.appendChild(cigIcon(frac));
+  if (full > maxIcons) {
+    const more = document.createElement('span');
+    more.style.cssText = 'font:600 13px/1 "IBM Plex Mono",monospace;color:var(--ink-2);margin-left:4px';
+    more.textContent = '+' + (full - maxIcons) + ' more';
+    wrap.appendChild(more);
+  }
+  if (cigs < 0.05) {
+    const none = document.createElement('span');
+    none.style.cssText = 'font:500 13px/1.4 "IBM Plex Sans",sans-serif;color:var(--ink-2)';
+    none.textContent = 'Practically smoke-free air right now.';
+    wrap.appendChild(none);
+  }
+}
+function cigIcon(fraction) {
+  const W = 46, H = 12, bodyX = 12;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', W); svg.setAttribute('height', H);
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  const bodyW = (W - bodyX) * fraction;
+  svg.innerHTML =
+    '<rect x="0" y="1" width="11" height="10" rx="2" fill="#d99a4e"/>' +
+    '<rect x="' + bodyX + '" y="1" width="' + (W - bodyX) + '" height="10" rx="2" fill="var(--surface-2)" stroke="var(--line)" stroke-width="1"/>' +
+    (bodyW > 1 ? '<rect x="' + bodyX + '" y="1" width="' + bodyW + '" height="10" rx="2" fill="#efede6" stroke="var(--line)" stroke-width="1"/>' : '') +
+    (fraction >= 0.99 ? '<circle cx="' + (W - 1.5) + '" cy="6" r="1.6" fill="#d43d2a"/>' : '');
+  return svg;
+}
+
+function renderPollutants(cur) {
+  const grid = $('poll-grid');
+  grid.innerHTML = '';
+  for (const p of POLLUTANTS) {
+    let conc = cur[p.apiKey];
+    let display = conc, d = conc != null && conc < 10 ? 1 : 0;
+    let siConc = conc;
+    if (p.key === 'co' && conc != null) { siConc = conc / 1000; display = siConc; d = 2; }
+    const si = subIndex(p.key, siConc);
+    const band = si != null ? bandFor(si, IN_BANDS) : null;
+    const w = si != null ? Math.min(100, si / 5) : 0;
+    const el = document.createElement('div');
+    el.className = 'poll';
+    el.innerHTML =
+      '<div class="name"><b>' + p.name + '</b><span>' + p.desc + '</span></div>' +
+      '<div class="val">' + fmt(display, d) + ' <small>' + p.unit + '</small></div>' +
+      '<div class="bar"><i style="width:' + w + '%;background:' + (band ? band.color : 'var(--line)') + '"></i></div>' +
+      '<div class="subidx">' + (si != null ? 'sub-index ' + si + ' · ' + band.label : 'no data') + '</div>';
+    grid.appendChild(el);
+  }
+}
+
+/* ---------- chart: last 24 h PM2.5, SVG with hover tooltip ---------- */
+let chartPts = [];
+function renderChart() {
+  const h = data.hourly;
+  const now = new Date(data.current.time).getTime();
+  const pts = [];
+  for (let i = 0; i < h.time.length; i++) {
+    const t = new Date(h.time[i]).getTime();
+    if (t <= now && h.pm2_5[i] != null) pts.push({ t, v: h.pm2_5[i], label: h.time[i] });
+  }
+  chartPts = pts.slice(-25); // 24h + current hour
+  const W = 680, H = 230, mL = 44, mR = 14, mT = 14, mB = 30;
+  const iw = W - mL - mR, ih = H - mT - mB;
+  if (chartPts.length < 2) { $('chart').innerHTML = '<p class="state" style="padding:20px">Not enough hourly data for a trend.</p>'; return; }
+  const t0 = chartPts[0].t, t1 = chartPts[chartPts.length - 1].t;
+  const vMax = Math.max(60, Math.ceil(Math.max(...chartPts.map(p => p.v)) / 25) * 25);
+  const X = t => mL + (t - t0) / (t1 - t0) * iw;
+  const Y = v => mT + ih - (v / vMax) * ih;
+
+  const yTicks = [0, vMax / 2, vMax];
+  let grid = '', yLabels = '';
+  for (const v of yTicks) {
+    grid += '<line x1="' + mL + '" x2="' + (W - mR) + '" y1="' + Y(v) + '" y2="' + Y(v) + '" stroke="var(--line)" stroke-width="1"/>';
+    yLabels += '<text x="' + (mL - 8) + '" y="' + (Y(v) + 4) + '" text-anchor="end" fill="var(--ink-3)" font-size="11" font-family="IBM Plex Mono,monospace">' + v + '</text>';
+  }
+  let xLabels = '';
+  const step = Math.ceil(chartPts.length / 5);
+  for (let i = 0; i < chartPts.length; i += step) {
+    const p = chartPts[i];
+    const hh = new Date(p.t).toLocaleTimeString('en-IN', { hour: 'numeric', hour12: true }).replace(' ', '').toLowerCase();
+    xLabels += '<text x="' + X(p.t) + '" y="' + (H - 9) + '" text-anchor="middle" fill="var(--ink-3)" font-size="11" font-family="IBM Plex Mono,monospace">' + hh + '</text>';
+  }
+  const lineD = chartPts.map((p, i) => (i ? 'L' : 'M') + X(p.t).toFixed(1) + ' ' + Y(p.v).toFixed(1)).join(' ');
+  const areaD = lineD + ' L' + X(t1).toFixed(1) + ' ' + (mT + ih) + ' L' + X(t0).toFixed(1) + ' ' + (mT + ih) + ' Z';
+  const last = chartPts[chartPts.length - 1];
+
+  $('chart').innerHTML =
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="PM2.5 over the last 24 hours">' +
+    grid + yLabels + xLabels +
+    '<path d="' + areaD + '" fill="var(--accent-soft)"/>' +
+    '<path d="' + lineD + '" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
+    '<circle cx="' + X(last.t) + '" cy="' + Y(last.v) + '" r="4" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/>' +
+    '<text x="' + Math.min(X(last.t), W - mR - 4) + '" y="' + Math.max(12, Y(last.v) - 10) + '" text-anchor="end" fill="var(--ink)" font-size="12" font-weight="600" font-family="IBM Plex Mono,monospace">' + Math.round(last.v) + '</text>' +
+    '<line id="xh" x1="0" x2="0" y1="' + mT + '" y2="' + (mT + ih) + '" stroke="var(--ink-3)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>' +
+    '<circle id="hover-dot" r="4.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="2" opacity="0"/>' +
+    '<rect id="hit" x="' + mL + '" y="' + mT + '" width="' + iw + '" height="' + ih + '" fill="transparent"/>' +
+    '</svg>';
+
+  const svg = $('chart').querySelector('svg');
+  const hit = svg.querySelector('#hit'), xh = svg.querySelector('#xh'), dot = svg.querySelector('#hover-dot');
+  const tip = $('tooltip');
+  const move = (ev) => {
+    const r = svg.getBoundingClientRect();
+    const sx = (ev.clientX - r.left) * (W / r.width);
+    const t = t0 + (sx - mL) / iw * (t1 - t0);
+    let best = chartPts[0];
+    for (const p of chartPts) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
+    const px = X(best.t), py = Y(best.v);
+    xh.setAttribute('x1', px); xh.setAttribute('x2', px); xh.setAttribute('opacity', '1');
+    dot.setAttribute('cx', px); dot.setAttribute('cy', py); dot.setAttribute('opacity', '1');
+    const when = new Date(best.t).toLocaleString('en-IN', { hour: 'numeric', minute: '2-digit', day: 'numeric', month: 'short' });
+    tip.textContent = when + ' · PM2.5 ' + Math.round(best.v) + ' µg/m³';
+    tip.style.display = 'block';
+    const card = tip.parentElement.getBoundingClientRect();
+    let tx = (px / W) * r.width + (r.left - card.left) + 12;
+    const ty = (py / H) * r.height + (r.top - card.top) - 34;
+    if (tx + tip.offsetWidth > card.width - 8) tx -= tip.offsetWidth + 24;
+    tip.style.left = tx + 'px'; tip.style.top = Math.max(2, ty) + 'px';
+  };
+  const leave = () => { xh.setAttribute('opacity', '0'); dot.setAttribute('opacity', '0'); tip.style.display = 'none'; };
+  hit.addEventListener('pointermove', move);
+  hit.addEventListener('pointerdown', move);
+  hit.addEventListener('pointerleave', leave);
+}
+
+/* ---------- location ---------- */
+function setLocation(next) {
+  loc = next;
+  try { localStorage.setItem('hawa-loc', JSON.stringify(loc)); } catch (e) {}
+  loadAir();
+}
+
+$('loc-btn').addEventListener('click', () => {
+  if (!navigator.geolocation) { alertInline('Geolocation is not available in this browser.'); return; }
+  const btn = $('loc-btn');
+  btn.disabled = true; btn.textContent = 'Locating…';
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    const { latitude: lat, longitude: lon } = pos.coords;
+    let name = 'Your location', sub = lat.toFixed(3) + '°, ' + lon.toFixed(3) + '°';
+    try {
+      const r = await fetch('https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=' + lat + '&longitude=' + lon + '&localityLanguage=en');
+      if (r.ok) {
+        const g = await r.json();
+        name = g.locality || g.city || name;
+        sub = [g.city && g.city !== name ? g.city : null, g.principalSubdivision, g.countryName].filter(Boolean).join(', ') || sub;
+      }
+    } catch (e) {}
+    resetLocBtn();
+    setLocation({ name, sub, lat, lon });
+  }, (err) => {
+    resetLocBtn();
+    alertInline(err.code === 1 ? 'Location permission was denied — allow it in your browser, or search for your area instead.' : 'Could not get your location. Try searching instead.');
+  }, { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 });
+});
+function resetLocBtn() {
+  const btn = $('loc-btn');
+  btn.disabled = false;
+  btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg> My location';
+}
+function alertInline(msg) {
+  $('loading').hidden = true;
+  $('error').hidden = false;
+  $('app').hidden = true;
+  $('error-msg').textContent = msg;
+}
+$('retry-btn').addEventListener('click', loadAir);
+$('refresh-btn').addEventListener('click', loadAir);
+
+/* ---------- search ---------- */
+let searchTimer = null;
+$('search').addEventListener('input', (e) => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  if (q.length < 2) { $('results').hidden = true; return; }
+  searchTimer = setTimeout(() => doSearch(q), 350);
+});
+$('search').addEventListener('keydown', (e) => { if (e.key === 'Escape') $('results').hidden = true; });
+document.addEventListener('click', (e) => { if (!e.target.closest('.searchbox')) $('results').hidden = true; });
+
+async function doSearch(q) {
+  try {
+    const u = 'https://geocoding-api.open-meteo.com/v1/search?name=' + encodeURIComponent(q) + '&count=6&language=en&format=json';
+    const res = await fetch(u);
+    const j = await res.json();
+    const box = $('results');
+    box.innerHTML = '';
+    if (!j.results || !j.results.length) {
+      box.innerHTML = '<button disabled style="color:var(--ink-3)">No places found</button>';
+      box.hidden = false;
+      return;
+    }
+    for (const r of j.results) {
+      const b = document.createElement('button');
+      const sub = [r.admin2, r.admin1, r.country].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i && v !== r.name).join(', ');
+      b.innerHTML = r.name + ' <span class="meta">' + sub + '</span>';
+      b.addEventListener('click', () => {
+        $('results').hidden = true;
+        $('search').value = '';
+        setLocation({ name: r.name, sub, lat: r.latitude, lon: r.longitude });
+      });
+      box.appendChild(b);
+    }
+    box.hidden = false;
+  } catch (e) { /* quiet — search is a convenience */ }
+}
+
+/* ---------- scale toggle ---------- */
+function setScale(s) {
+  scale = s;
+  try { localStorage.setItem('hawa-scale', s); } catch (e) {}
+  $('scale-in').setAttribute('aria-pressed', String(s === 'in'));
+  $('scale-us').setAttribute('aria-pressed', String(s === 'us'));
+  if (data) render();
+}
+$('scale-in').addEventListener('click', () => setScale('in'));
+$('scale-us').addEventListener('click', () => setScale('us'));
+$('scale-in').setAttribute('aria-pressed', String(scale === 'in'));
+$('scale-us').setAttribute('aria-pressed', String(scale === 'us'));
+
+/* ---------- auto refresh every 20 min ---------- */
+setInterval(() => { if (!document.hidden) loadAir(); }, 20 * 60 * 1000);
+
+loadAir();
+</script>
+</body>
+</html>
